@@ -10,7 +10,7 @@ const API_KEY = process.env.ANTHROPIC_API_KEY;
 if (!API_KEY) {
   console.warn('Warning: ANTHROPIC_API_KEY is not set. Set it before starting the server.');
 }
-
+app.get('/', (req, res) => res.json({ status: 'SnapID backend running' }));
 app.post('/identify', async (req, res) => {
   const { image, mediaType } = req.body;
   if (!image || !mediaType) {
