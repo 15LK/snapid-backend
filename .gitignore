@@ -1,0 +1,41 @@
+# === SnapID Backend .gitignore ===
+# Tento soubor říká Gitu které soubory NIKDY nemá uploadovat na GitHub.
+
+# --- Závislosti (knihovny z npm) ---
+# Tyhle se generují automaticky příkazem `npm install`
+# Railway si je stáhne sám podle package.json — nepotřebuje je z repa.
+node_modules/
+
+# --- Tajemství (BEZPEČNOST!) ---
+# Tady leží API klíče, hesla, tokeny. NIKDY na veřejný GitHub.
+.env
+.env.local
+.env.production
+.env.*.local
+
+# --- MacOS smetí ---
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# --- Logy ---
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- Editor / IDE nastavení ---
+# Osobní nastavení tvého editoru, nepotřebuje to nikdo jiný.
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- Build a cache ---
+dist/
+build/
+.cache/
+.parcel-cache/
+
+# --- Misc ---
+.env.example.localchore: add .gitignore to prevent secrets and node_modules from being committed
