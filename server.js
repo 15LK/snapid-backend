@@ -153,6 +153,54 @@ app.post('/identify', scanRateLimiter, async (req, res) => {
   }
 });
 
+// ─── PRO EMAIL STORE ──────────────────────────────────────────────────────────
+// proEmails: Set of verified purchaser emails (populated via Gumroad webhook)
+// Resets on server restart — users re-enter email once after restart.
+const proEmails = new Set();
+
+// ─── GUMROAD WEBHOOK ──────────────────────────────────────────────────────────
+// Gumroad pings this URL on every sale / cancellation.
+// Set Ping URL in: gumroad.com/settings/advanced → Ping URL
+app.post('/webhook', express.urlencoded({ extended: true }), (req, res) => {
+  const { email, cancelled, test, product_permalink } = req.body;
+
+  if (!email) {
+    return res.status(400).send('Missing email');
+  }
+
+  const normalizedEmail = email.toLowerCase().trim();
+
+  // Ignore test purchases in production
+  if (test === 'true') {
+    console.log(`[SnapID] Webhook test ping from ${normalizedEmail}, ignored`);
+    return res.status(200).send('ok');
+  }
+
+  if (cancelled === 'true') {
+    proEmails.delete(normalizedEmail);
+    console.log(`[SnapID] Pro cancelled: ${normalizedEmail} (total: ${proEmails.size})`);
+  } else {
+    proEmails.add(normalizedEmail);
+    console.log(`[SnapID] Pro activated: ${normalizedEmail} (total: ${proEmails.size})`);
+  }
+
+  res.status(200).send('ok');
+});
+
+// ─── VERIFY EMAIL ─────────────────────────────────────────────────────────────
+app.post('/verify-email', (req, res) => {
+  const { email } = req.body;
+  if (!email || typeof email !== 'string') {
+    return res.status(400).json({ valid: false, message: 'Email is required.' });
+  }
+
+  const normalizedEmail = email.toLowerCase().trim();
+  const valid = proEmails.has(normalizedEmail);
+
+  console.log(`[SnapID] Email verify: ${normalizedEmail} → ${valid}`);
+  res.json({ valid });
+});
+
 // ─── START ────────────────────────────────────────────────────────────────────
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`SnapID backend running on port ${port}`));
