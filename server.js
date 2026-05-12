@@ -104,10 +104,11 @@ app.post('/identify', scanRateLimiter, async (req, res) => {
   }
 
   // ── 3. CALL ANTHROPIC API (with retry on overloaded_error) ────────────────
-  const MAX_RETRIES = 3;
+  const MODELS = ['claude-sonnet-4-6', 'claude-haiku-4-5-20251001'];
+  const MAX_RETRIES_PER_MODEL = 2;
   const RETRY_DELAY_MS = 2000;
 
-  const callAnthropic = async () => {
+  const callAnthropic = async (model) => {
     return fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -116,7 +117,7 @@ app.post('/identify', scanRateLimiter, async (req, res) => {
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
+        model,
         max_tokens: 600,
         messages: [
           {
@@ -138,26 +139,42 @@ app.post('/identify', scanRateLimiter, async (req, res) => {
     let response;
     let lastError;
 
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      response = await callAnthropic();
+    // Try each model — Sonnet first, Haiku as fallback
+    modelLoop:
+    for (const model of MODELS) {
+      for (let attempt = 1; attempt <= MAX_RETRIES_PER_MODEL; attempt++) {
+        response = await callAnthropic(model);
 
-      if (response.ok) break;
+        if (response.ok) {
+          console.log(`[SnapID] API OK with model: ${model}`);
+          break modelLoop;
+        }
 
-      const errorBody = await response.text();
-      lastError = errorBody;
+        const errorBody = await response.text();
+        lastError = errorBody;
 
-      // Retry only on overloaded (529) or server errors (5xx)
-      const isRetryable = response.status === 529 ||
-        (response.status >= 500 && response.status < 600);
+        const isOverloaded = response.status === 529 ||
+          (response.status >= 500 && response.status < 600);
 
-      if (!isRetryable || attempt === MAX_RETRIES) {
-        console.warn(`[SnapID] API error (attempt ${attempt}): ${response.status}`);
-        return res.status(response.status).json({ error: `Anthropic API error: ${lastError}` });
+        if (!isOverloaded) {
+          // Non-retryable error (auth, bad request, etc.) — fail immediately
+          console.warn(`[SnapID] API non-retryable error: ${response.status}`);
+          return res.status(response.status).json({ error: `Anthropic API error: ${lastError}` });
+        }
+
+        if (attempt < MAX_RETRIES_PER_MODEL) {
+          const delay = RETRY_DELAY_MS;
+          console.warn(`[SnapID] ${model} overloaded, retry in ${delay}ms (attempt ${attempt}/${MAX_RETRIES_PER_MODEL})`);
+          await new Promise(r => setTimeout(r, delay));
+        } else {
+          console.warn(`[SnapID] ${model} overloaded after ${MAX_RETRIES_PER_MODEL} attempts, trying fallback`);
+        }
       }
+    }
 
-      const delay = RETRY_DELAY_MS * attempt; // 2s, 4s, 6s
-      console.warn(`[SnapID] Overloaded, retrying in ${delay}ms (attempt ${attempt}/${MAX_RETRIES})`);
-      await new Promise(r => setTimeout(r, delay));
+    // All models failed
+    if (!response.ok) {
+      return res.status(529).json({ error: `Anthropic API error: ${lastError}` });
     }
 
     const data = await response.json();
