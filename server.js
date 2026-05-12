@@ -103,9 +103,12 @@ app.post('/identify', scanRateLimiter, async (req, res) => {
     });
   }
 
-  // ── 3. CALL ANTHROPIC API ──────────────────────────────────────────────────
-  try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+  // ── 3. CALL ANTHROPIC API (with retry on overloaded_error) ────────────────
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY_MS = 2000;
+
+  const callAnthropic = async () => {
+    return fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -129,10 +132,32 @@ app.post('/identify', scanRateLimiter, async (req, res) => {
         ]
       })
     });
+  };
 
-    if (!response.ok) {
+  try {
+    let response;
+    let lastError;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      response = await callAnthropic();
+
+      if (response.ok) break;
+
       const errorBody = await response.text();
-      return res.status(response.status).json({ error: `Anthropic API error: ${errorBody}` });
+      lastError = errorBody;
+
+      // Retry only on overloaded (529) or server errors (5xx)
+      const isRetryable = response.status === 529 ||
+        (response.status >= 500 && response.status < 600);
+
+      if (!isRetryable || attempt === MAX_RETRIES) {
+        console.warn(`[SnapID] API error (attempt ${attempt}): ${response.status}`);
+        return res.status(response.status).json({ error: `Anthropic API error: ${lastError}` });
+      }
+
+      const delay = RETRY_DELAY_MS * attempt; // 2s, 4s, 6s
+      console.warn(`[SnapID] Overloaded, retrying in ${delay}ms (attempt ${attempt}/${MAX_RETRIES})`);
+      await new Promise(r => setTimeout(r, delay));
     }
 
     const data = await response.json();
